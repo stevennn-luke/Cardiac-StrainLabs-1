@@ -1,0 +1,15 @@
+# Core API dependencies
+fastapi==0.119.1
+uvicorn==0.38.0
+python-multipart==0.0.20
+
+# ML dependencies - Python 3.13 requires numpy>=2.1.0 for ml-dtypes
+tensorflow==2.20.0
+numpy>=2.1.0
+opencv-python-headless>=4.10.0
+
+h5py==3.14.0
+requests==2.32.5
+
+pydantic==2.12.3
+starlette==0.48.0

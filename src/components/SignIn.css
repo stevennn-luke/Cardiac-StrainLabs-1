@@ -1,0 +1,583 @@
+@import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+Antique:wght@300;400;500;700&display=swap');
+
+.signin-container {
+  min-height: 100vh;
+  width: 100%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.signin-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px;
+  min-height: 100vh;
+}
+
+.signin-container .content-wrapper {
+  width: 100%;
+  max-width: 1400px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.signin-container .content-wrapper.centered {
+  flex-direction: column;
+  justify-content: center;
+}
+
+.signin-container .content-wrapper.positioned {
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  padding-top: 0;
+  gap: 130px;
+  height: 100%;
+}
+
+.signin-container .left-section {
+  flex: 0 0 auto;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.signin-container .left-section > div {
+  display: flex;
+  flex-direction: column;
+  gap: 130px;
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.signin-container .content-wrapper.centered .left-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.signin-container .content-wrapper.centered .left-section > div {
+  gap: 50px;
+  transform: translateX(0);
+}
+
+.signin-container .content-wrapper.positioned .left-section {
+  align-items: flex-start;
+}
+
+.signin-container .content-wrapper.positioned .left-section > div {
+  animation: fadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.signin-container .logo-container {
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-bottom: 0;
+}
+
+.signin-container .content-wrapper.centered .logo-container {
+  display: flex;
+  justify-content: center;
+}
+
+.signin-container .logo-container.fade-in {
+  opacity: 1 !important;
+}
+
+.signin-container .logo-csl {
+  max-width: 360px;
+  height: auto;
+  display: block;
+}
+
+.signin-container .content-wrapper.positioned .logo-csl {
+  max-width: 240px;
+}
+
+.signin-container .tagline-container {
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.signin-container .content-wrapper.centered .tagline-container {
+  text-align: center;
+  max-width: 800px;
+}
+
+.signin-container .content-wrapper.positioned .tagline-container {
+  text-align: left;
+}
+
+.signin-container .tagline-container.fade-in {
+  opacity: 1 !important;
+}
+
+.signin-container .main-heading {
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 48px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 20px 0;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  transition: font-size 0.3s ease;
+}
+
+.signin-container .content-wrapper.centered .main-heading {
+  display: none;
+}
+
+.signin-container .tagline-text {
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  color: #ffffff;
+  line-height: 1.6;
+  margin: 0 0 20px 0;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  transition: font-size 0.3s ease;
+}
+
+.signin-container .content-wrapper.centered .tagline-text {
+  font-size: 19.2px;
+}
+
+.signin-container .content-wrapper.positioned .tagline-text {
+  font-size: 18px;
+}
+
+.signin-container .pagination-dots {
+  display: flex;
+  gap: 12px;
+  margin-top: 0;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s;
+}
+
+.signin-container .content-wrapper.centered .pagination-dots {
+  display: none;
+}
+
+.signin-container .content-wrapper.positioned .pagination-dots {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.signin-container .dot {
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  transition: background 0.3s ease;
+}
+
+.signin-container .dot.active {
+  background: #ffffff;
+}
+
+.signin-container .right-section {
+  flex: 0 0 450px;
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  align-items: flex-start;
+  padding-top: 70px;
+  align-self: stretch;
+}
+
+.signin-container .content-wrapper.centered .right-section {
+  display: none !important;
+}
+
+.signin-container .content-wrapper.positioned .right-section {
+  display: flex;
+}
+
+.signin-container .right-section.show-card {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.signin-card {
+  background: #ffffff;
+  border-radius: 20px 20px 0 0;
+  padding: 45px 40px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  flex-grow: 1;
+  height: 100%;
+}
+
+.card-title {
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 28px;
+  font-weight: 500;
+  color: #000000;
+  margin: 0 0 30px 0;
+  text-align: left;
+}
+
+.signin-container .error-message {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  border-radius: 8px;
+  color: #c33;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 14px;
+  color: #757575;
+  font-weight: 400;
+  text-align: left;
+}
+
+.form-input {
+  padding: 14px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: border-color 0.3s ease;
+  outline: none;
+  background: #ffffff;
+  color: #000000;
+}
+
+.form-input:focus {
+  border-color: #000000;
+}
+
+.form-input::placeholder {
+  color: #999;
+}
+
+.password-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-wrapper .form-input {
+  padding-right: 45px;
+  width: 100%;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  height: 20px;
+}
+
+.divider {
+  text-align: center;
+  position: relative;
+  margin: 25px 0;
+}
+
+.divider span {
+  background: #ffffff;
+  padding: 0 15px;
+  color: #999;
+  font-size: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #e0e0e0;
+}
+
+.social-buttons {
+  display: flex;
+  gap: 15px;
+}
+
+.social-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 48px;
+  background: #ffffff;
+  cursor: pointer;
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: #616161;
+  transition: border-color 0.3s ease, background 0.3s ease;
+  white-space: nowrap;
+}
+
+.social-btn:hover {
+  border-color: #000000;
+  background: #f8f8f8;
+}
+
+.social-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.remember-forgot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: -8px;
+}
+
+.remember-me {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 14px;
+  color: #666666;
+}
+
+.remember-me input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: #f5f5f5;
+  border: 2px solid #cccccc;
+  border-radius: 3px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.remember-me input[type="checkbox"]:hover {
+  border-color: #999999;
+  background-color: #eeeeee;
+}
+
+.remember-me input[type="checkbox"]:checked {
+  background-color: #666666;
+  border-color: #666666;
+}
+
+.remember-me input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.forgot-link {
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+  font-size: 14px;
+  color: #666666;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.forgot-link:hover {
+  color: #000000;
+  text-decoration: underline;
+}
+
+.continue-btn {
+  padding: 16px;
+  background: #000000;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s ease;
+  margin-top: 10px;
+}
+
+.continue-btn:hover {
+  background: #333333;
+}
+
+.signup-link {
+  text-align: center;
+  margin-top: 25px;
+  color: #666666;
+  font-size: 14px;
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+}
+
+.signup-btn {
+  background: none;
+  border: none;
+  color: #000000;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+  font-size: 14px;
+  font-family: 'Zen Kaku Gothic Antique', sans-serif;
+}
+
+.signup-btn:hover {
+  text-decoration: underline;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .signin-overlay {
+    padding: 60px 40px;
+  }
+
+  .signin-container .content-wrapper.positioned {
+    gap: 80px;
+  }
+
+  .signin-container .main-heading {
+    font-size: 38px;
+  }
+
+  .signin-container .right-section {
+    flex: 0 0 400px;
+  }
+}
+
+@media (max-width: 968px) {
+  .signin-overlay {
+    padding: 40px 20px;
+  }
+
+  .signin-container .content-wrapper.positioned {
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+  }
+
+  .signin-container .content-wrapper.positioned .left-section {
+    text-align: center;
+    max-width: 100%;
+    align-items: center;
+  }
+  
+  .signin-container .content-wrapper.positioned .left-section > div {
+    gap: 40px;
+  }
+
+  .signin-container .content-wrapper.positioned .tagline-container {
+    text-align: center;
+  }
+
+  .signin-container .pagination-dots {
+    justify-content: center;
+  }
+
+  .signin-container .right-section {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 450px;
+  }
+}
+
+@media (max-width: 600px) {
+  .signin-container .logo-csl {
+    max-width: 240px;
+  }
+
+  .signin-container .content-wrapper.positioned .logo-csl {
+    max-width: 180px;
+  }
+
+  .signin-container .main-heading {
+    font-size: 32px;
+  }
+
+  .signin-container .tagline-text {
+    font-size: 16px;
+  }
+
+  .signin-container .content-wrapper.centered .tagline-text {
+    font-size: 20px;
+  }
+
+  .signin-card {
+    padding: 35px 25px;
+  }
+
+  .card-title {
+    font-size: 24px;
+  }
+
+  .social-buttons {
+    flex-direction: row;
+  }
+  
+  .social-btn {
+    font-size: 12px;
+  }
+}
+
