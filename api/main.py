@@ -12,22 +12,19 @@ class CompatibleBatchNormalization(tf.keras.layers.BatchNormalization):
     """Custom BatchNormalization layer that handles axis as list or int"""
     
     def __init__(self, axis=-1, **kwargs):
-        # Convert axis from list to int if needed
         if isinstance(axis, list):
             axis = axis[0] if len(axis) > 0 else -1
         super().__init__(axis=axis, **kwargs)
     
     @classmethod
     def from_config(cls, config):
-        # Convert axis from list to int before calling parent from_config
         if 'axis' in config and isinstance(config['axis'], list):
-            config = config.copy()  # Don't modify the original
+            config = config.copy()
             config['axis'] = config['axis'][0] if len(config['axis']) > 0 else -1
         return cls(**config)
     
     def get_config(self):
         config = super().get_config()
-        # Ensure axis is always an int in the config
         if isinstance(config.get('axis'), list):
             config['axis'] = config['axis'][0] if len(config['axis']) > 0 else -1
         return config
@@ -62,7 +59,6 @@ def load_model():
             print("="*50)
             print("Loading attention detection model...")
             
-            # Configure TensorFlow threading
             tf.config.threading.set_inter_op_parallelism_threads(1)
             tf.config.threading.set_intra_op_parallelism_threads(1)
             
@@ -74,7 +70,6 @@ def load_model():
             print(f"Model path: {model_path}")
             print(f"File exists: {os.path.exists(model_path)}")
             
-            # Load the model (should work now that it's been fixed)
             MODEL = tf.keras.models.load_model(model_path, compile=False)
             
             print("✓ Model loaded successfully!")
@@ -105,15 +100,12 @@ async def analyze(data: dict):
         print(f"BMI: {data.get('bmi')}")
         print(f"Clinical Parameters: {data.get('clinicalParameters')}")
         
-        # TODO: Replace this with actual model prediction
-        # For now, return mock results based on BMI and other parameters
+        
         bmi = float(data.get('bmi', 25))
         age = int(data.get('age', 30))
         
-        # Calculate mock risk score (0-100)
         risk_score = min(100, max(0, (bmi - 18.5) * 5 + (age - 30) * 0.5))
         
-        # Determine category
         if risk_score < 30:
             category = "Low Risk"
             prediction = "Normal"
@@ -200,7 +192,6 @@ def process_video_file(video_bytes) -> np.ndarray:
 async def predict_frame(file: UploadFile = File(...)):
     """Predict from a single frame for real-time analysis"""
     try:
-        # Read the image
         image_bytes = await file.read()
         nparr = np.frombuffer(image_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -211,12 +202,10 @@ async def predict_frame(file: UploadFile = File(...)):
                 'message': 'Could not decode image'
             }
         
-        # Process single frame - duplicate it to match NUM_FRAMES requirement
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_resized = cv2.resize(frame_rgb, (FRAME_WIDTH, FRAME_HEIGHT))
         frame_normalized = frame_resized.astype(np.float32) / 255.0
         
-        # Create a sequence by duplicating the frame
         frames = [frame_normalized] * NUM_FRAMES
         video_array = np.array(frames)
         video_batch = np.expand_dims(video_array, 0)
