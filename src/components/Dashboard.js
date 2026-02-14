@@ -6,13 +6,20 @@ import { db } from '../firebase/config';
 import './Dashboard.css';
 import logoCSL from '../assets/logo-CSL.png';
 import homeScreenBg from '../assets/Home-Screen.jpg';
+import Tesseract from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist';
+import { FileUp, Keyboard } from 'lucide-react';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 function Dashboard() {
   const { logout, currentUser } = useAuth();
   const navigate = useNavigate();
   const [showContent, setShowContent] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
+  const [popupMode, setPopupMode] = useState('selection'); // 'selection' or 'form'
   const [isSaving, setIsSaving] = useState(false);
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -73,6 +80,106 @@ function Dashboard() {
       return { category: 'Overweight', range: '25-29.9', isHighlighted: true };
     } else {
       return { category: 'Obese', range: '30 and higher', isHighlighted: true };
+    }
+  };
+
+  const processExtractedText = (text) => {
+    const newFormData = { ...formData };
+    const newClinicalParams = { ...clinicalParams };
+
+    // Helper to find value by regex
+    const findValue = (patterns) => {
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) return match[1].trim();
+      }
+      return null;
+    };
+
+    // Patient Info
+    const age = findValue([/Age[:\s]+(\d+)/i, /Age\s+(\d+)/i]);
+    if (age) newFormData.age = age;
+
+    const gender = text.match(/Sex[:\s]+(Male|Female)|Gender[:\s]+(Male|Female)|(Male|Female)/i);
+    if (gender) newFormData.gender = gender[1] || gender[2] || gender[3];
+
+    const height = findValue([/Height[:\s]+(\d+)/i, /Height\s+(\d+)/i]);
+    if (height) newFormData.height = height;
+
+    const weight = findValue([/Weight[:\s]+(\d+)/i, /Weight\s+(\d+)/i]);
+    if (weight) newFormData.weight = weight;
+
+    // Clinical Parameters
+    const nfatc3 = findValue([/NFATC3[:\s]+([\d.]+)/i, /NFATC3\s+([\d.]+)/i]);
+    if (nfatc3) newClinicalParams.nfatc3 = nfatc3;
+
+    // DM - Diabetes Mellitus
+    // Check for "Absent" or "Present" or "Yes" or "No"
+    const dmMatch = text.match(/Diabetes\s*Mellitus[:\s]+(Absent|Present|Yes|No)/i);
+    if (dmMatch) {
+      const val = dmMatch[1].toLowerCase();
+      newClinicalParams.dm = (val === 'present' || val === 'yes') ? '1' : '0';
+    } else {
+      // numeric fallback
+      const dmNum = findValue([/DM[:\s]+([\d.]+)/i]);
+      if (dmNum) newClinicalParams.dm = dmNum;
+    }
+
+
+    const gls = findValue([/GLS[:\s]+(-?[\d.]+)/i, /GLS\s+(-?[\d.]+)/i]);
+    if (gls) newClinicalParams.gls = gls;
+
+
+    const ef = findValue([/Ejection\s*Fraction\s*\(LVEF\)[:\s]+(\d+)/i, /LVEF[:\s]+(\d+)/i, /EF[:\s]+(\d+)/i]);
+    if (ef) newClinicalParams.ef = ef;
+
+    const probnp = findValue([/NT-proBNP[:\s]+([\d.]+)/i, /proBNP[:\s]+([\d.]+)/i]);
+    if (probnp) newClinicalParams.proBNP = probnp;
+
+    // Auto-calculate BMI if missing but height/weight present
+    if (newFormData.height && newFormData.weight) {
+      newFormData.bmi = calculateBMI(newFormData.height, newFormData.weight);
+    } else {
+      const bmi = findValue([/BMI[:\s]+([\d.]+)/i]);
+      if (bmi) newFormData.bmi = bmi;
+    }
+
+    setFormData(newFormData);
+    setClinicalParams(newClinicalParams);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsProcessingOCR(true);
+    try {
+      let text = '';
+      if (file.type === 'application/pdf') {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          text += textContent.items.map(item => item.str).join(' ') + ' ';
+        }
+      } else {
+        const result = await Tesseract.recognize(
+          file,
+          'eng',
+          { logger: m => console.log(m) }
+        );
+        text = result.data.text;
+      }
+
+      console.log('Extracted Text:', text);
+      processExtractedText(text);
+      setPopupMode('form');
+    } catch (error) {
+      console.error('OCR Error:', error);
+      alert('Failed to process document. Please try again or enter manually.');
+    } finally {
+      setIsProcessingOCR(false);
     }
   };
 
@@ -292,7 +399,15 @@ function Dashboard() {
       ef: '',
       gls: ''
     });
+    setClinicalParams({
+      nfatc3: '',
+      dm: '',
+      proBNP: '',
+      ef: '',
+      gls: ''
+    });
     setModelResults(null);
+    setPopupMode('selection');
   };
 
   const handleCloseResults = () => {
@@ -403,7 +518,7 @@ function Dashboard() {
           </div>
           <div className="nav-links">
             <a href="#home" onClick={(e) => { e.preventDefault(); handleTabChange('home'); }} className="nav-link">Home</a>
-            <a href="#add-user" onClick={(e) => { e.preventDefault(); setShowPopup(true); }} className="nav-link">Add User</a>
+            <a href="#add-user" onClick={(e) => { e.preventDefault(); setShowPopup(true); setPopupMode('form'); }} className="nav-link">Add User</a>
             <a href="#track-user" onClick={(e) => { e.preventDefault(); handleTabChange('track-user'); }} className="nav-link">Track User</a>
             <a href="#vision" onClick={(e) => { e.preventDefault(); handleTabChange('vision'); }} className="nav-link">Our Vision</a>
             <button onClick={handleLogout} className="nav-link logout-btn">Logout</button>
@@ -418,7 +533,7 @@ function Dashboard() {
               <p className="description">
                 we propose a Large Language Model (LLM)–informed, AI-driven heart health system that integrates clinical precision with public accessibility.
               </p>
-              <button className="try-it-btn" onClick={() => setShowPopup(true)}>
+              <button className="try-it-btn" onClick={() => { setShowPopup(true); setPopupMode('selection'); }}>
                 Try it Out
               </button>
             </div>
@@ -668,245 +783,269 @@ function Dashboard() {
             <div className="popup-overlay" onClick={handleClosePopup}>
               <div className="popup-content" onClick={(e) => e.stopPropagation()}>
                 <div className="popup-header">
-                  <h2 className="popup-title">Add User Profile</h2>
+                  <h2 className="popup-title">
+                    {popupMode === 'selection' ? 'Choose Input Method' : 'Add User Profile'}
+                  </h2>
                   <button className="close-btn" onClick={handleClosePopup}>×</button>
                 </div>
 
-                <form className="popup-form" onSubmit={handleSubmit}>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">
-                        Name <span className="required-asterisk">*</span>
-                      </label>
+                {popupMode === 'selection' ? (
+                  <div className="selection-container">
+                    <label className="selection-card">
                       <input
-                        type="text"
-                        name="name"
-                        value={formData.name}
-                        onChange={handleInputChange}
-                        className="form-input"
-                        required
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={handleFileUpload}
+                        className="file-input-hidden"
                       />
+                      <FileUp className="selection-icon" size={48} />
+                      <h3>Upload Document</h3>
+                      <p>Upload a PDF or Image</p>
+                      {isProcessingOCR && <p style={{ color: '#667eea', marginTop: '10px' }}>Processing...</p>}
+                    </label>
+                    <div className="selection-card" onClick={() => setPopupMode('form')}>
+                      <Keyboard className="selection-icon" size={48} />
+                      <h3>Enter Manually</h3>
+                      <p>Fill out the form yourself</p>
                     </div>
                   </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">
-                        Age <span className="required-asterisk">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="age"
-                        value={formData.age}
-                        onChange={handleInputChange}
-                        className="form-input"
-                        placeholder="Enter age"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">
-                        Gender <span className="required-asterisk">*</span>
-                      </label>
-                      <div className="radio-group">
-                        <label className="radio-option">
-                          <input
-                            type="radio"
-                            name="gender"
-                            value="Male"
-                            checked={formData.gender === 'Male'}
-                            onChange={handleInputChange}
-                            className="radio-input"
-                          />
-                          <span className="radio-label">Male</span>
-                        </label>
-                        <label className="radio-option">
-                          <input
-                            type="radio"
-                            name="gender"
-                            value="Female"
-                            checked={formData.gender === 'Female'}
-                            onChange={handleInputChange}
-                            className="radio-input"
-                          />
-                          <span className="radio-label">Female</span>
-                        </label>
-                        <label className="radio-option">
-                          <input
-                            type="radio"
-                            name="gender"
-                            value="Prefer not to say"
-                            checked={formData.gender === 'Prefer not to say'}
-                            onChange={handleInputChange}
-                            className="radio-input"
-                          />
-                          <span className="radio-label">Prefer not to say</span>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">
-                        Height (cm) {!formData.bmi && <span className="required-asterisk">*</span>}
-                      </label>
-                      <input
-                        type="number"
-                        name="height"
-                        value={formData.height}
-                        onChange={handleInputChange}
-                        className="form-input"
-                        placeholder="e.g., 175"
-                        disabled={!!formData.bmi}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">
-                        Weight (kg) {!formData.bmi && <span className="required-asterisk">*</span>}
-                      </label>
-                      <input
-                        type="number"
-                        name="weight"
-                        value={formData.weight}
-                        onChange={handleInputChange}
-                        className="form-input"
-                        placeholder="e.g., 70"
-                        disabled={!!formData.bmi}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="or-separator">
-                    <span className="or-text">OR</span>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">
-                        BMI {!formData.height && !formData.weight && <span className="required-asterisk">*</span>}
-                      </label>
-                      <input
-                        type="text"
-                        name="bmi"
-                        value={formData.bmi}
-                        onChange={handleInputChange}
-                        className="form-input"
-                        placeholder="Enter BMI directly"
-                        disabled={!!(formData.height || formData.weight)}
-                      />
-                    </div>
-                  </div>
-
-                  {formData.bmi && parseFloat(formData.bmi) > 0 && (
-                    <div className="bmi-chart-container">
-                      <h4 className="bmi-chart-title">BMI Categories</h4>
-                      <div className="bmi-chart">
-                        <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Underweight' ? 'highlighted' : ''}`}>
-                          <div className="bmi-category-name">Underweight</div>
-                          <div className="bmi-category-range">Below 18.5</div>
-                        </div>
-                        <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Normal weight' ? 'highlighted' : ''}`}>
-                          <div className="bmi-category-name">Normal weight</div>
-                          <div className="bmi-category-range">18.5-24.9</div>
-                        </div>
-                        <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Overweight' ? 'highlighted' : ''}`}>
-                          <div className="bmi-category-name">Overweight</div>
-                          <div className="bmi-category-range">25-29.9</div>
-                        </div>
-                        <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Obese' ? 'highlighted' : ''}`}>
-                          <div className="bmi-category-name">Obese</div>
-                          <div className="bmi-category-range">30 and higher</div>
-                        </div>
-                      </div>
-                      <div className="bmi-disclaimer">
-                        Note: The BMI may not be accurate for people with greater muscle mass (such as athletes) or in older people and others who have lost muscle mass.
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="non-editable-section">
-                    <h3 className="section-title">Non-Clinical Parameters</h3>
+                ) : (
+                  <form className="popup-form" onSubmit={handleSubmit}>
                     <div className="form-row">
                       <div className="form-group">
-                        <label className="form-label">NFATc3</label>
+                        <label className="form-label">
+                          Name <span className="required-asterisk">*</span>
+                        </label>
                         <input
                           type="text"
-                          name="nfatc3"
-                          value={clinicalParams.nfatc3}
-                          onChange={handleClinicalParamChange}
+                          name="name"
+                          value={formData.name}
+                          onChange={handleInputChange}
                           className="form-input"
-                          placeholder="Enter NFATc3 value"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">DM</label>
-                        <input
-                          type="text"
-                          name="dm"
-                          value={clinicalParams.dm}
-                          onChange={handleClinicalParamChange}
-                          className="form-input"
-                          placeholder="Enter DM value"
+                          required
                         />
                       </div>
                     </div>
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">proBNP</label>
-                        <input
-                          type="text"
-                          name="proBNP"
-                          value={clinicalParams.proBNP}
-                          onChange={handleClinicalParamChange}
-                          className="form-input"
-                          placeholder="Enter proBNP value"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label">EF</label>
-                        <input
-                          type="text"
-                          name="ef"
-                          value={clinicalParams.ef}
-                          onChange={handleClinicalParamChange}
-                          className="form-input"
-                          placeholder="Enter EF value"
-                        />
-                      </div>
-                    </div>
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">GLS</label>
-                        <input
-                          type="text"
-                          name="gls"
-                          value={clinicalParams.gls}
-                          onChange={handleClinicalParamChange}
-                          className="form-input"
-                          placeholder="Enter GLS value"
-                        />
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="form-actions">
-                    <button type="button" className="cancel-btn" onClick={handleClosePopup}>
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="analyze-btn"
-                      onClick={handleAnalyze}
-                      disabled={isAnalyzing}
-                    >
-                      {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-                    </button>
-                  </div>
-                </form>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">
+                          Age <span className="required-asterisk">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="age"
+                          value={formData.age}
+                          onChange={handleInputChange}
+                          className="form-input"
+                          placeholder="Enter age"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">
+                          Gender <span className="required-asterisk">*</span>
+                        </label>
+                        <div className="radio-group">
+                          <label className="radio-option">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value="Male"
+                              checked={formData.gender === 'Male'}
+                              onChange={handleInputChange}
+                              className="radio-input"
+                            />
+                            <span className="radio-label">Male</span>
+                          </label>
+                          <label className="radio-option">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value="Female"
+                              checked={formData.gender === 'Female'}
+                              onChange={handleInputChange}
+                              className="radio-input"
+                            />
+                            <span className="radio-label">Female</span>
+                          </label>
+                          <label className="radio-option">
+                            <input
+                              type="radio"
+                              name="gender"
+                              value="Prefer not to say"
+                              checked={formData.gender === 'Prefer not to say'}
+                              onChange={handleInputChange}
+                              className="radio-input"
+                            />
+                            <span className="radio-label">Prefer not to say</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">
+                          Height (cm) {!formData.bmi && <span className="required-asterisk">*</span>}
+                        </label>
+                        <input
+                          type="number"
+                          name="height"
+                          value={formData.height}
+                          onChange={handleInputChange}
+                          className="form-input"
+                          placeholder="e.g., 175"
+                          disabled={!!(formData.bmi && !formData.height && !formData.weight)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">
+                          Weight (kg) {!formData.bmi && <span className="required-asterisk">*</span>}
+                        </label>
+                        <input
+                          type="number"
+                          name="weight"
+                          value={formData.weight}
+                          onChange={handleInputChange}
+                          className="form-input"
+                          placeholder="e.g., 70"
+                          disabled={!!(formData.bmi && !formData.height && !formData.weight)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="or-separator">
+                      <span className="or-text">OR</span>
+                    </div>
+
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">
+                          BMI {!formData.height && !formData.weight && <span className="required-asterisk">*</span>}
+                        </label>
+                        <input
+                          type="text"
+                          name="bmi"
+                          value={formData.bmi}
+                          onChange={handleInputChange}
+                          className="form-input"
+                          placeholder="Enter BMI directly"
+                          disabled={!!(formData.height || formData.weight)}
+                        />
+                      </div>
+                    </div>
+
+                    {formData.bmi && parseFloat(formData.bmi) > 0 && (
+                      <div className="bmi-chart-container">
+                        <h4 className="bmi-chart-title">BMI Categories</h4>
+                        <div className="bmi-chart">
+                          <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Underweight' ? 'highlighted' : ''}`}>
+                            <div className="bmi-category-name">Underweight</div>
+                            <div className="bmi-category-range">Below 18.5</div>
+                          </div>
+                          <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Normal weight' ? 'highlighted' : ''}`}>
+                            <div className="bmi-category-name">Normal weight</div>
+                            <div className="bmi-category-range">18.5-24.9</div>
+                          </div>
+                          <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Overweight' ? 'highlighted' : ''}`}>
+                            <div className="bmi-category-name">Overweight</div>
+                            <div className="bmi-category-range">25-29.9</div>
+                          </div>
+                          <div className={`bmi-category ${getBMICategory(formData.bmi).category === 'Obese' ? 'highlighted' : ''}`}>
+                            <div className="bmi-category-name">Obese</div>
+                            <div className="bmi-category-range">30 and higher</div>
+                          </div>
+                        </div>
+                        <div className="bmi-disclaimer">
+                          Note: The BMI may not be accurate for people with greater muscle mass (such as athletes) or in older people and others who have lost muscle mass.
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="non-editable-section">
+                      <h3 className="section-title">Non-Clinical Parameters</h3>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label className="form-label">NFATc3</label>
+                          <input
+                            type="text"
+                            name="nfatc3"
+                            value={clinicalParams.nfatc3}
+                            onChange={handleClinicalParamChange}
+                            className="form-input"
+                            placeholder="Enter NFATc3 value"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">DM</label>
+                          <input
+                            type="text"
+                            name="dm"
+                            value={clinicalParams.dm}
+                            onChange={handleClinicalParamChange}
+                            className="form-input"
+                            placeholder="Enter DM value"
+                          />
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label className="form-label">proBNP</label>
+                          <input
+                            type="text"
+                            name="proBNP"
+                            value={clinicalParams.proBNP}
+                            onChange={handleClinicalParamChange}
+                            className="form-input"
+                            placeholder="Enter proBNP value"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">EF</label>
+                          <input
+                            type="text"
+                            name="ef"
+                            value={clinicalParams.ef}
+                            onChange={handleClinicalParamChange}
+                            className="form-input"
+                            placeholder="Enter EF value"
+                          />
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label className="form-label">GLS</label>
+                          <input
+                            type="text"
+                            name="gls"
+                            value={clinicalParams.gls}
+                            onChange={handleClinicalParamChange}
+                            className="form-input"
+                            placeholder="Enter GLS value"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="form-actions">
+                      <button type="button" className="cancel-btn" onClick={handleClosePopup}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="analyze-btn"
+                        onClick={handleAnalyze}
+                        disabled={isAnalyzing}
+                      >
+                        {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             </div>
           )}
