@@ -1,7 +1,9 @@
+
 import os
 import joblib
 import pandas as pd
 import numpy as np
+from google.cloud import storage
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,8 @@ app = FastAPI()
 origins = [
     "http://localhost",
     "http://localhost:3000",
+    "https://cardiac-strainlabs.web.app",
+    "https://cardiac-strainlabs.firebaseapp.com"
 ]
 
 app.add_middleware(
@@ -22,81 +26,144 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# GCS Configuration
+BUCKET_NAME = "cardiac-strainlabs-486917-models"
+MODEL_FILE = "hfpef_model.pkl"
+LOCAL_MODEL_PATH = "model.pkl"
+
 MODEL = None
 
+def download_model():
+    """Download model from GCS bucket if not exists"""
+    try:
+        if not os.path.exists(LOCAL_MODEL_PATH):
+            print(f"Downloading model from gs://{BUCKET_NAME}/{MODEL_FILE}...")
+            client = storage.Client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(MODEL_FILE)
+            blob.download_to_filename(LOCAL_MODEL_PATH)
+            print("Model downloaded successfully.")
+        else:
+            print("Model file already exists locally.")
+    except Exception as e:
+        print(f"Error downloading model: {e}")
+        # If running locally and file exists in training models, try to use that
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local_dev_path = os.path.join(base_dir, "training models", MODEL_FILE)
+        if os.path.exists(local_dev_path):
+             print(f"Using local dev model from {local_dev_path}")
+             import shutil
+             shutil.copy(local_dev_path, LOCAL_MODEL_PATH)
+
 def load_model():
-    """Load the Scikit-Learn model (lazy loading)"""
+    """Load the model into memory"""
     global MODEL
     if MODEL is None:
-        try:
-            print("="*50)
-            print("Loading cardiac risk model...")
-            
-            # Use relative path from api/main.py to training models/Model-2.pkl
-            # assuming main.py is in /api/ and training models is in /training models/
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            model_path = os.path.join(base_dir, "training models", "Model-2.pkl")
-            
-            print(f"Model path: {model_path}")
-            print(f"File exists: {os.path.exists(model_path)}")
-            
-            MODEL = joblib.load(model_path)
-            
-            print("✓ Model loaded successfully!")
-            print(f"Model type: {type(MODEL)}")
-            print("="*50)
-            
-        except Exception as e:
-            print(f"✗ ERROR loading model: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            raise RuntimeError(f"Failed to load model: {str(e)}")
-    
+        download_model()
+        if os.path.exists(LOCAL_MODEL_PATH):
+            try:
+                # Load joblib artifact
+                MODEL = joblib.load(LOCAL_MODEL_PATH)
+                print("Model loaded into memory.")
+                print(f"Model type: {type(MODEL)}")
+            except Exception as e:
+                print(f"Failed to load model file: {e}")
+        else:
+            print("Model file not found locally after download attempt.")
     return MODEL
+
+@app.on_event("startup")
+async def startup_event():
+    load_model()
 
 @app.get("/ping")
 async def ping():
-    return "Hello, I am alive (Scikit-Learn Backend)"
+    return "Hello, I am alive (GCS Model Backend)"
 
 @app.post("/analyze")
 async def analyze(data: dict):
-    """Analyze patient data and return predictions"""
+    """Analyze patient data and return predictions using local model"""
     try:
-        model = load_model()
-        
+        artifact = load_model()
+        if artifact is None:
+            raise RuntimeError("Model artifact not loaded")
+
+        # Handle dictionary artifact (model + scaler) vs direct model object
+        model = None
+        scaler = None
+        if isinstance(artifact, dict):
+             model = artifact.get('model')
+             scaler = artifact.get('scaler')
+        else:
+             model = artifact
+
+        if model is None:
+            raise RuntimeError("Could not extract model from artifact")
+
         print("="*50)
-        print("Analyzing patient data...")
+        print("Analyzing patient data (Local GCS Model)...")
         print(f"Patient: {data.get('name')}")
         
-        # Extract features in the correct order: Age, BMI, PROBNP, EF, GLS, NFATC3
+        # Extract features
         age = float(data.get('age', 0))
+        gender_str = str(data.get('gender', '')).lower()
         bmi = float(data.get('bmi', 0))
         clinical = data.get('clinicalParameters', {})
         
+        # Parse clinical params
         probnp = float(clinical.get('proBNP', 0))
         ef = float(clinical.get('ef', 0))
         gls = float(clinical.get('gls', 0))
         nfatc3 = float(clinical.get('nfatc3', 0))
         
-        print(f"Features: Age={age}, BMI={bmi}, PROBNP={probnp}, EF={ef}, GLS={gls}, NFATC3={nfatc3}")
+        # Handle DM (Diabetes) - simplified parsing
+        dm_val = clinical.get('dm', 0)
+        try:
+            dm = float(dm_val)
+        except:
+            if str(dm_val).lower() in ['yes', 'y', 'true']:
+                dm = 1.0
+            else:
+                dm = 0.0
+
+        # Map Gender to 0/1 (Assuming Male=1, Female=0 based on typical datasets, strictly check this!)
+        # Defaulting to Male=1, Female=0 as per common conventions in medical datasets if not specified
+        gender = 1.0 if 'male' in gender_str else 0.0
         
-        # Create input array
+        print(f"Features Raw: Age={age}, Gender={gender}, BMI={bmi}, DM={dm}, PROBNP={probnp}, EF={ef}, GLS={gls}, NFATC3={nfatc3}")
+        
+        # Create user input DataFrame with correct column names matching training
+        # Training cols: ['age', 'gender', 'bmi', 'dm', 'probnp', 'ef', 'gls', 'nfatc3']
         input_data = pd.DataFrame([{
-            'Age': age,
-            'BMI': bmi,
-            'PROBNP': probnp,
-            'EF': ef,
-            'GLS': gls,
-            'NFATC3': nfatc3
+            'age': age,
+            'gender': gender,
+            'bmi': bmi,
+            'dm': dm,
+            'probnp': probnp,
+            'ef': ef,
+            'gls': gls,
+            'nfatc3': nfatc3
         }])
         
+        # Apply scaling if available
+        if scaler:
+            print("Applying scaler transform...")
+            try:
+                # Ensure input_data matches scaler's expected features
+                input_scaled = scaler.transform(input_data)
+            except Exception as e:
+                print(f"Warning: Scaler transform failed: {e}. Using raw data.")
+                input_scaled = input_data
+        else:
+            input_scaled = input_data
+
         # Predict
-        prediction_class = model.predict(input_data)[0]
+        prediction_class = model.predict(input_scaled)[0]
         
         # Get probability if available
         confidence = 0.0
         if hasattr(model, 'predict_proba'):
-            probs = model.predict_proba(input_data)[0]
+            probs = model.predict_proba(input_scaled)[0]
             confidence = float(np.max(probs))
             print(f"Probabilities: {probs}")
         else:
@@ -113,6 +180,7 @@ async def analyze(data: dict):
         category = "Unknown"
         recommendation = ""
         prediction_label = "Unknown"
+        risk_score = 0
         
         # Handle string labels if the model returns them directly (e.g. 'Normal', 'High')
         if 'normal' in pred_str:
@@ -148,15 +216,15 @@ async def analyze(data: dict):
                  prediction_label = "Attention Required"
                  recommendation = "Urgent cardiology referral is recommended for comprehensive heart-failure evaluation, consideration of guideline-directed medical therapy, and further investigations including coronary angiography as clinically indicated."
                  risk_score = 85
-
+    
         results = {
-            "risk_score": risk_score, # Providing a pseudo score for UI compatibility
+            "risk_score": risk_score, 
             "prediction": prediction_label,
             "confidence": confidence,
             "category": category,
             "recommendation": recommendation,
-            "model_version": "2.0.0 (Scikit-Learn)",
-            "timestamp": "2026-01-19"
+            "model_version": "2.1.0 (GCS sklearn w/ Scaler)",
+            "timestamp": "2026-02-14"
         }
         
         print("✓ Analysis complete!")
@@ -173,3 +241,6 @@ async def analyze(data: dict):
             'message': 'Failed to analyze patient data',
             'traceback': traceback.format_exc()
         }
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)

@@ -17,7 +17,7 @@ function Dashboard() {
   const navigate = useNavigate();
   const [showContent, setShowContent] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
-  const [popupMode, setPopupMode] = useState('selection'); // 'selection' or 'form'
+  const [popupMode, setPopupMode] = useState('selection'); 
   const [isSaving, setIsSaving] = useState(false);
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
 
@@ -87,7 +87,7 @@ function Dashboard() {
     const newFormData = { ...formData };
     const newClinicalParams = { ...clinicalParams };
 
-    // Helper to find value by regex
+   
     const findValue = (patterns) => {
       for (const pattern of patterns) {
         const match = text.match(pattern);
@@ -120,7 +120,7 @@ function Dashboard() {
       const val = dmMatch[1].toLowerCase();
       newClinicalParams.dm = (val === 'present' || val === 'yes') ? '1' : '0';
     } else {
-      // numeric fallback
+      
       const dmNum = findValue([/DM[:\s]+([\d.]+)/i]);
       if (dmNum) newClinicalParams.dm = dmNum;
     }
@@ -136,7 +136,7 @@ function Dashboard() {
     const probnp = findValue([/NT-proBNP[:\s]+([\d.]+)/i, /proBNP[:\s]+([\d.]+)/i]);
     if (probnp) newClinicalParams.proBNP = probnp;
 
-    // Auto-calculate BMI if missing but height/weight present
+    // Auto-calculate BMI 
     if (newFormData.height && newFormData.weight) {
       newFormData.bmi = calculateBMI(newFormData.height, newFormData.weight);
     } else {
@@ -262,7 +262,7 @@ function Dashboard() {
         }
       };
 
-      const response = await fetch('http://127.0.0.1:8000/analyze', {
+      const response = await fetch('https://cardiac-api-nyu5ktt44a-uc.a.run.app/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -283,7 +283,7 @@ function Dashboard() {
       }
     } catch (error) {
       console.error('Error during analysis:', error);
-      alert('Failed to analyze data. Make sure the API server is running on http://127.0.0.1:8000');
+      alert('Failed to analyze data. Please try again later.');
     } finally {
       setIsAnalyzing(false);
     }

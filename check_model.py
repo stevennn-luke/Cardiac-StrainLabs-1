@@ -1,17 +1,19 @@
+
 import joblib
-import os
 import sys
 
 try:
-    path = "training models/Model-2.pkl"
-    print(f"Loading {path}...")
-    model = joblib.load(path)
-    print(f"Model type: {type(model)}")
+    model_path = 'training models/hfpef_model.pkl'
+    print(f"Loading {model_path}...")
+    model = joblib.load(model_path)
+    print(f"Type: {type(model)}")
     
-    if hasattr(model, 'classes_'):
-        print(f"Classes found: {model.classes_}")
+    if isinstance(model, dict):
+        print(f"Keys: {model.keys()}")
+        if 'model' in model:
+            print(f"Model sub-key type: {type(model['model'])}")
     else:
-        print("Model does not have 'classes_' attribute.")
-
+        print("Model is not a dictionary.")
+        
 except Exception as e:
     print(f"Error: {e}")
