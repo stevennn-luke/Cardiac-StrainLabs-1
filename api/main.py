@@ -28,49 +28,73 @@ app.add_middleware(
 
 # GCS Configuration
 BUCKET_NAME = "cardiac-strainlabs-486917-models"
-MODEL_FILE = "hfpef_model.pkl"
-LOCAL_MODEL_PATH = "model.pkl"
+MODEL_FILE = "heart_lr_dm.pkl"
+SCALER_FILE = "scaler_lr_dm.pkl"
+FEATURES_FILE = "feature_cols_lr_dm.pkl"
+
+LOCAL_MODEL_PATH = "heart_lr_dm.pkl"
+LOCAL_SCALER_PATH = "scaler_lr_dm.pkl"
+LOCAL_FEATURES_PATH = "feature_cols_lr_dm.pkl"
 
 MODEL = None
+SCALER = None
+FEATURES = None
 
 def download_model():
-    """Download model from GCS bucket if not exists"""
+    """Download model files from GCS bucket if not exists"""
     try:
-        if not os.path.exists(LOCAL_MODEL_PATH):
-            print(f"Downloading model from gs://{BUCKET_NAME}/{MODEL_FILE}...")
-            client = storage.Client()
-            bucket = client.bucket(BUCKET_NAME)
-            blob = bucket.blob(MODEL_FILE)
-            blob.download_to_filename(LOCAL_MODEL_PATH)
-            print("Model downloaded successfully.")
-        else:
-            print("Model file already exists locally.")
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        
+        files_to_download = [
+            (MODEL_FILE, LOCAL_MODEL_PATH),
+            (SCALER_FILE, LOCAL_SCALER_PATH),
+            (FEATURES_FILE, LOCAL_FEATURES_PATH)
+        ]
+        
+        for gcs_file, local_path in files_to_download:
+            if not os.path.exists(local_path):
+                print(f"Downloading from gs://{BUCKET_NAME}/{gcs_file}...")
+                blob = bucket.blob(gcs_file)
+                blob.download_to_filename(local_path)
+                print(f"{gcs_file} downloaded successfully.")
+            else:
+                print(f"{local_path} already exists locally.")
     except Exception as e:
-        print(f"Error downloading model: {e}")
-        # If running locally and file exists in training models, try to use that
+        print(f"Error downloading models: {e}")
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        local_dev_path = os.path.join(base_dir, "training models", MODEL_FILE)
-        if os.path.exists(local_dev_path):
-             print(f"Using local dev model from {local_dev_path}")
-             import shutil
-             shutil.copy(local_dev_path, LOCAL_MODEL_PATH)
+        
+        files_to_download = [
+            (MODEL_FILE, LOCAL_MODEL_PATH),
+            (SCALER_FILE, LOCAL_SCALER_PATH),
+            (FEATURES_FILE, LOCAL_FEATURES_PATH)
+        ]
+        for gcs_file, local_path in files_to_download:
+            local_dev_path = os.path.join(base_dir, "training models", gcs_file)
+            if os.path.exists(local_dev_path):
+                 print(f"Using local dev model from {local_dev_path}")
+                 import shutil
+                 shutil.copy(local_dev_path, local_path)
 
 def load_model():
-    """Load the model into memory"""
-    global MODEL
+    """Load the model files into memory"""
+    global MODEL, SCALER, FEATURES
     if MODEL is None:
         download_model()
         if os.path.exists(LOCAL_MODEL_PATH):
             try:
-                # Load joblib artifact
                 MODEL = joblib.load(LOCAL_MODEL_PATH)
-                print("Model loaded into memory.")
+                SCALER = joblib.load(LOCAL_SCALER_PATH)
+                FEATURES = joblib.load(LOCAL_FEATURES_PATH)
+                print("Models loaded into memory.")
                 print(f"Model type: {type(MODEL)}")
+                print(f"Scaler type: {type(SCALER)}")
+                print(f"Features list: {FEATURES}")
             except Exception as e:
-                print(f"Failed to load model file: {e}")
+                print(f"Failed to load model files: {e}")
         else:
-            print("Model file not found locally after download attempt.")
-    return MODEL
+            print("Model files not found locally after download attempt.")
+    return MODEL, SCALER, FEATURES
 
 @app.on_event("startup")
 async def startup_event():
@@ -84,21 +108,9 @@ async def ping():
 async def analyze(data: dict):
     """Analyze patient data and return predictions using local model"""
     try:
-        artifact = load_model()
-        if artifact is None:
-            raise RuntimeError("Model artifact not loaded")
-
-        # Handle dictionary artifact (model + scaler) vs direct model object
-        model = None
-        scaler = None
-        if isinstance(artifact, dict):
-             model = artifact.get('model')
-             scaler = artifact.get('scaler')
-        else:
-             model = artifact
-
+        model, scaler, feature_cols = load_model()
         if model is None:
-            raise RuntimeError("Could not extract model from artifact")
+            raise RuntimeError("Model artifact not loaded")
 
         print("="*50)
         print("Analyzing patient data (Local GCS Model)...")
@@ -106,7 +118,6 @@ async def analyze(data: dict):
         
         # Extract features
         age = float(data.get('age', 0))
-        gender_str = str(data.get('gender', '')).lower()
         bmi = float(data.get('bmi', 0))
         clinical = data.get('clinicalParameters', {})
         
@@ -116,40 +127,35 @@ async def analyze(data: dict):
         gls = float(clinical.get('gls', 0))
         nfatc3 = float(clinical.get('nfatc3', 0))
         
-        # Handle DM (Diabetes) - simplified parsing
         dm_val = clinical.get('dm', 0)
         try:
             dm = float(dm_val)
         except:
-            if str(dm_val).lower() in ['yes', 'y', 'true']:
+            if str(dm_val).lower() in ['yes', 'y', 'true', 'present', '1']:
                 dm = 1.0
             else:
                 dm = 0.0
 
-        # Map Gender to 0/1 (Assuming Male=1, Female=0 based on typical datasets, strictly check this!)
-        # Defaulting to Male=1, Female=0 as per common conventions in medical datasets if not specified
-        gender = 1.0 if 'male' in gender_str else 0.0
+        print(f"Features Raw: Age={age}, BMI={bmi}, DM={dm}, PROBNP={probnp}, EF={ef}, GLS={gls}, NFATC3={nfatc3}")
         
-        print(f"Features Raw: Age={age}, Gender={gender}, BMI={bmi}, DM={dm}, PROBNP={probnp}, EF={ef}, GLS={gls}, NFATC3={nfatc3}")
+        input_dict = {
+            'Age': age,
+            'BMI': bmi,
+            'PROBNP': probnp,
+            'EF': ef,
+            'GLS': gls,
+            'NFATC3': nfatc3,
+            'DM': dm
+        }
+
+
+        formatted_input = {col: input_dict.get(col, 0) for col in feature_cols}
+        input_data = pd.DataFrame([formatted_input])
         
-        # Create user input DataFrame with correct column names matching training
-        # Training cols: ['age', 'gender', 'bmi', 'dm', 'probnp', 'ef', 'gls', 'nfatc3']
-        input_data = pd.DataFrame([{
-            'age': age,
-            'gender': gender,
-            'bmi': bmi,
-            'dm': dm,
-            'probnp': probnp,
-            'ef': ef,
-            'gls': gls,
-            'nfatc3': nfatc3
-        }])
-        
-        # Apply scaling if available
+
         if scaler:
             print("Applying scaler transform...")
             try:
-                # Ensure input_data matches scaler's expected features
                 input_scaled = scaler.transform(input_data)
             except Exception as e:
                 print(f"Warning: Scaler transform failed: {e}. Using raw data.")
@@ -157,24 +163,18 @@ async def analyze(data: dict):
         else:
             input_scaled = input_data
 
-        # Predict
         prediction_class = model.predict(input_scaled)[0]
         
-        # Get probability if available
         confidence = 0.0
         if hasattr(model, 'predict_proba'):
             probs = model.predict_proba(input_scaled)[0]
             confidence = float(np.max(probs))
             print(f"Probabilities: {probs}")
         else:
-            confidence = 1.0 # Default if no proba
+            confidence = 1.0 
             
         print(f"Prediction Class: {prediction_class}")
 
-        # Map prediction to response
-        # Assuming classes map to: 0 -> Normal, 1 -> Moderate, 2 -> High (or string labels)
-        
-        # Check if prediction is string or int/float
         pred_str = str(prediction_class).lower()
         
         category = "Unknown"
@@ -182,7 +182,7 @@ async def analyze(data: dict):
         prediction_label = "Unknown"
         risk_score = 0
         
-        # Handle string labels if the model returns them directly (e.g. 'Normal', 'High')
+
         if 'normal' in pred_str:
             category = "Normal Risk"
             prediction_label = "Normal"
@@ -199,7 +199,6 @@ async def analyze(data: dict):
             recommendation = "Urgent cardiology referral is recommended for comprehensive heart-failure evaluation, consideration of guideline-directed medical therapy, and further investigations including coronary angiography as clinically indicated."
             risk_score = 85 # High pseudo score
         else:
-            # Fallback for integer encoding (likely LabelEncoder alphabetical: High=0, Moderate=1, Normal=2)
             if int(prediction_class) == 0:
                  category = "Normal Risk"
                  prediction_label = "Normal"
@@ -223,8 +222,8 @@ async def analyze(data: dict):
             "confidence": confidence,
             "category": category,
             "recommendation": recommendation,
-            "model_version": "2.1.0 (GCS sklearn w/ Scaler)",
-            "timestamp": "2026-02-14"
+            "model_version": "2.2.0 (GCS LogisticRegression w/ Scaler)",
+            "timestamp": "2026-03-17"
         }
         
         print("✓ Analysis complete!")

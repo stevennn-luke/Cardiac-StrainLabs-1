@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { collection, getDocs, doc, updateDoc, addDoc, query, where, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, query, where, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import './Dashboard.css';
 import logoCSL from '../assets/logo-CSL.png';
@@ -17,7 +17,7 @@ function Dashboard() {
   const navigate = useNavigate();
   const [showContent, setShowContent] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
-  const [popupMode, setPopupMode] = useState('selection'); 
+  const [popupMode, setPopupMode] = useState('selection');
   const [isSaving, setIsSaving] = useState(false);
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
 
@@ -52,6 +52,11 @@ function Dashboard() {
   const [notification, setNotification] = useState(null);
   const [editingUserId, setEditingUserId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
+  const [existingUserId, setExistingUserId] = useState(null);
+
+  const [doctorProfile, setDoctorProfile] = useState({ name: '', position: '', email: '', dob: '' });
+  const [isEditingDoctor, setIsEditingDoctor] = useState(false);
+  const [isSavingDoctor, setIsSavingDoctor] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -83,11 +88,15 @@ function Dashboard() {
     }
   };
 
+  /* 
+   * processExtractedText: Uses Regex pattern matching on raw text 
+   * to extract recognized Patient Demographics and Clinical Parameters.
+   */
   const processExtractedText = (text) => {
     const newFormData = { ...formData };
     const newClinicalParams = { ...clinicalParams };
 
-   
+
     const findValue = (patterns) => {
       for (const pattern of patterns) {
         const match = text.match(pattern);
@@ -96,51 +105,69 @@ function Dashboard() {
       return null;
     };
 
-    // Patient Info
-    const age = findValue([/Age[:\s]+(\d+)/i, /Age\s+(\d+)/i]);
+    const age = findValue([/Age[\s:=]*(\d+)/i, /Age[^\d\n]{0,15}(\d+)/i]);
     if (age) newFormData.age = age;
 
-    const gender = text.match(/Sex[:\s]+(Male|Female)|Gender[:\s]+(Male|Female)|(Male|Female)/i);
-    if (gender) newFormData.gender = gender[1] || gender[2] || gender[3];
+    const genderMatch = text.match(/(?:Sex|Gender)[\s:=]*(Male|Female)|(Male|Female)\b/i);
+    if (genderMatch) {
+      newFormData.gender = genderMatch[1] || genderMatch[2] || genderMatch[3];
+    } else {
+      const isolated = text.match(/\b(Male|Female)\b/i);
+      if (isolated) newFormData.gender = isolated[1];
+    }
 
-    const height = findValue([/Height[:\s]+(\d+)/i, /Height\s+(\d+)/i]);
+    const height = findValue([/Height[\s:=]*(\d+)/i, /Height[^\d\n]{0,15}(\d+)/i]);
     if (height) newFormData.height = height;
 
-    const weight = findValue([/Weight[:\s]+(\d+)/i, /Weight\s+(\d+)/i]);
+    const weight = findValue([/Weight[\s:=]*(\d+)/i, /Weight[^\d\n]{0,15}(\d+)/i]);
     if (weight) newFormData.weight = weight;
 
-    // Clinical Parameters
-    const nfatc3 = findValue([/NFATC3[:\s]+([\d.]+)/i, /NFATC3\s+([\d.]+)/i]);
+    const nfatc3 = findValue([
+      /NFATC[\s-]*3[\s:=]*([\d.]+)/i,
+      /NFATC3[^\w\d]{0,8}([\d.]+)/i,
+      /NFATC3[^\d\n]{0,15}([\d.]+)/i
+    ]);
     if (nfatc3) newClinicalParams.nfatc3 = nfatc3;
 
-    // DM - Diabetes Mellitus
-    // Check for "Absent" or "Present" or "Yes" or "No"
-    const dmMatch = text.match(/Diabetes\s*Mellitus[:\s]+(Absent|Present|Yes|No)/i);
-    if (dmMatch) {
+    const dmMatch = text.match(/(?:Diabetes\s*Mellitus|Diabetes|DM)[^\w\d]{0,10}(Absent|Present|Yes|No)/i);
+    if (dmMatch && dmMatch[1]) {
       const val = dmMatch[1].toLowerCase();
       newClinicalParams.dm = (val === 'present' || val === 'yes') ? '1' : '0';
     } else {
-      
-      const dmNum = findValue([/DM[:\s]+([\d.]+)/i]);
+      const dmNum = findValue([/DM[\s:=]*([\d.]+)/i, /Diabetes[\s:=]+([\d.]+)/i]);
       if (dmNum) newClinicalParams.dm = dmNum;
     }
 
+    const glsMatch = text.match(/GLS[\s:=]*([-\u2010-\u2015]?\s*[\d.]+)/i);
+    if (glsMatch && glsMatch[1]) {
+      let val = glsMatch[1].replace(/\s+/g, '');
+      val = val.replace(/[\u2010-\u2015]/g, '-');
+      if (val.match(/^-?[\d.]+$/)) {
+        newClinicalParams.gls = val;
+      }
+    } else {
+      const glsFb = findValue([/GLS[^\d\n]{0,15}(-?[\d.]+)/i]);
+      if (glsFb) newClinicalParams.gls = glsFb;
+    }
 
-    const gls = findValue([/GLS[:\s]+(-?[\d.]+)/i, /GLS\s+(-?[\d.]+)/i]);
-    if (gls) newClinicalParams.gls = gls;
-
-
-    const ef = findValue([/Ejection\s*Fraction\s*\(LVEF\)[:\s]+(\d+)/i, /LVEF[:\s]+(\d+)/i, /EF[:\s]+(\d+)/i]);
+    const ef = findValue([
+      /Ejection\s*Fraction(?:\s*\(LVEF\))?[\s:=]*(\d+)/i,
+      /LVEF[\s:=]*(\d+)/i,
+      /EF[\s:=]*(\d+)/i,
+      /Ejection\s*Fraction[^\d]{0,15}(\d+)/i
+    ]);
     if (ef) newClinicalParams.ef = ef;
 
-    const probnp = findValue([/NT-proBNP[:\s]+([\d.]+)/i, /proBNP[:\s]+([\d.]+)/i]);
+    const probnp = findValue([
+      /(?:NT[\s-]*)?pro[\s-]*BNP[\s:=]*([\d.]+)/i,
+      /proBNP[^\d\n]{0,15}([\d.]+)/i
+    ]);
     if (probnp) newClinicalParams.proBNP = probnp;
 
-    // Auto-calculate BMI 
     if (newFormData.height && newFormData.weight) {
       newFormData.bmi = calculateBMI(newFormData.height, newFormData.weight);
     } else {
-      const bmi = findValue([/BMI[:\s]+([\d.]+)/i]);
+      const bmi = findValue([/BMI[\s:=]*([\d.]+)/i, /BMI[^\d\n]{0,15}([\d.]+)/i]);
       if (bmi) newFormData.bmi = bmi;
     }
 
@@ -148,6 +175,10 @@ function Dashboard() {
     setClinicalParams(newClinicalParams);
   };
 
+  /* 
+   * handleFileUpload: Initiates document parsing functionality.
+   * Leverages PDF.js for native PDFs and Tesseract.js for standard images.
+   */
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -164,12 +195,73 @@ function Dashboard() {
           text += textContent.items.map(item => item.str).join(' ') + ' ';
         }
       } else {
-        const result = await Tesseract.recognize(
-          file,
-          'eng',
-          { logger: m => console.log(m) }
-        );
-        text = result.data.text;
+        const textFromImage = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = async () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const scale = 2.0;
+              canvas.width = img.width * scale;
+              canvas.height = img.height * scale;
+
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = 'white';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+
+              const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const data = imgData.data;
+              const w = canvas.width;
+              const h = canvas.height;
+
+
+              for (let i = 0; i < data.length; i += 4) {
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+
+                const val = avg < 200 ? 0 : 255;
+                data[i] = data[i + 1] = data[i + 2] = val;
+                data[i + 3] = 255;
+              }
+
+              const clone = new Uint8ClampedArray(data);
+              const getP = (x, y) => {
+                if (x < 0 || y < 0 || x >= w || y >= h) return 255;
+                return clone[(y * w + x) * 4];
+              };
+
+
+              for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                  if (getP(x, y) === 0) {
+                    let vCount = 1;
+                    let dy = 1; while (getP(x, y + dy) === 0) { vCount++; dy++; }
+                    dy = 1; while (getP(x, y - dy) === 0) { vCount++; dy++; }
+
+                    let hCount = 1;
+                    let dx = 1; while (getP(x + dx, y) === 0) { hCount++; dx++; }
+                    dx = 1; while (getP(x - dx, y) === 0) { hCount++; dx++; }
+
+                    if (vCount > 60 || hCount > 60) {
+                      const idx = (y * w + x) * 4;
+                      data[idx] = data[idx + 1] = data[idx + 2] = 255;
+                    }
+                  }
+                }
+              }
+              ctx.putImageData(imgData, 0, 0);
+              const dataUrl = canvas.toDataURL('image/png');
+
+              const result = await Tesseract.recognize(dataUrl, 'eng', { logger: m => console.log(m) });
+              resolve(result.data.text);
+            } catch (err) {
+              reject(err);
+            }
+          };
+          img.onerror = () => reject(new Error('Failed to load image for OCR preprocessing'));
+          img.src = URL.createObjectURL(file);
+        });
+        text = textFromImage;
       }
 
       console.log('Extracted Text:', text);
@@ -218,6 +310,10 @@ function Dashboard() {
     }));
   };
 
+  /* 
+   * handleAnalyze: Sends compiled user form data to our custom ML API endpoint
+   * to calculate Cardiac Risk Score & Predictions.
+   */
   const handleAnalyze = async () => {
 
     if (!formData.name.trim()) {
@@ -289,6 +385,10 @@ function Dashboard() {
     }
   };
 
+  /* 
+   * handleSubmit: Commits the tracked patient data to Firebase Firestore.
+   * Differentiates whether the Doctor selected to "Update Existing" vs "Add New".
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -349,11 +449,17 @@ function Dashboard() {
       console.log('Data to save:', userProfileData);
 
 
-      const profilesRef = collection(db, 'userProfiles');
-      const docRef = await addDoc(profilesRef, userProfileData);
-
-      console.log('✅ Profile saved successfully to Firestore!');
-      console.log('Document ID:', docRef.id);
+      if (existingUserId) {
+        const profileRef = doc(db, 'userProfiles', existingUserId);
+        await updateDoc(profileRef, userProfileData);
+        console.log('✅ Profile updated successfully in Firestore!');
+        console.log('Document ID:', existingUserId);
+      } else {
+        const profilesRef = collection(db, 'userProfiles');
+        const docRef = await addDoc(profilesRef, userProfileData);
+        console.log('✅ Profile saved successfully to Firestore!');
+        console.log('Document ID:', docRef.id);
+      }
       console.log('Saved data:', userProfileData);
 
       setNotification({ message: 'Profile saved successfully! Go to "Track User" to view details.', type: 'success' });
@@ -408,6 +514,7 @@ function Dashboard() {
     });
     setModelResults(null);
     setPopupMode('selection');
+    setExistingUserId(null);
   };
 
   const handleCloseResults = () => {
@@ -439,6 +546,23 @@ function Dashboard() {
     }
   }
 
+  const handleDeleteUser = async (profileId) => {
+    try {
+      await deleteDoc(doc(db, 'userProfiles', profileId));
+      setTrackedUsersData(prev => prev.filter(u => u.id !== profileId));
+      if (expandedCardId === profileId) setExpandedCardId(null);
+      setNotification({ message: 'Profile deleted successfully.', type: 'success' });
+      setTimeout(() => setNotification(null), 3000);
+    } catch (error) {
+      console.error('Error deleting profile:', error);
+      alert('Failed to delete profile: ' + error.message);
+    }
+  };
+
+  /* 
+   * fetchUserData: Refreshes the patient list from Firestore by fetching
+   * all `userProfiles` that belong to the currently logged in doctor (`userId`).
+   */
   const fetchUserData = async () => {
     if (!currentUser) return;
     setIsLoadingData(true);
@@ -489,10 +613,29 @@ function Dashboard() {
     }
   };
 
+  /* 
+   * fetchProfile: Loads the personal details of the logged in User.
+   */
+  const fetchDoctorProfile = async () => {
+    if (!currentUser) return;
+    try {
+      const docRef = doc(db, 'doctorProfiles', currentUser.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setDoctorProfile(docSnap.data());
+      } else {
+        setDoctorProfile({ name: '', position: '', email: currentUser.email || '', dob: '' });
+      }
+    } catch (error) {
+      console.error("Error fetching doctor profile:", error);
+    }
+  };
+
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     if (tab === 'track-user' || tab === 'profile') {
       fetchUserData();
+      if (tab === 'profile') fetchDoctorProfile();
       setShowContent(false);
     } else if (tab === 'home') {
       setTimeout(() => setShowContent(true), 100);
@@ -518,8 +661,9 @@ function Dashboard() {
           </div>
           <div className="nav-links">
             <a href="#home" onClick={(e) => { e.preventDefault(); handleTabChange('home'); }} className="nav-link">Home</a>
-            <a href="#add-user" onClick={(e) => { e.preventDefault(); setShowPopup(true); setPopupMode('form'); }} className="nav-link">Add User</a>
+            <a href="#add-user" onClick={(e) => { e.preventDefault(); setShowPopup(true); fetchUserData(); setPopupMode('user-type-selection'); }} className="nav-link">Add User</a>
             <a href="#track-user" onClick={(e) => { e.preventDefault(); handleTabChange('track-user'); }} className="nav-link">Track User</a>
+            <a href="#profile" onClick={(e) => { e.preventDefault(); handleTabChange('profile'); }} className="nav-link">Profile</a>
             <a href="#vision" onClick={(e) => { e.preventDefault(); handleTabChange('vision'); }} className="nav-link">Our Vision</a>
             <button onClick={handleLogout} className="nav-link logout-btn">Logout</button>
           </div>
@@ -533,7 +677,7 @@ function Dashboard() {
               <p className="description">
                 we propose a Large Language Model (LLM)–informed, AI-driven heart health system that integrates clinical precision with public accessibility.
               </p>
-              <button className="try-it-btn" onClick={() => { setShowPopup(true); setPopupMode('selection'); }}>
+              <button className="try-it-btn" onClick={() => { setShowPopup(true); fetchUserData(); setPopupMode('user-type-selection'); }}>
                 Try it Out
               </button>
             </div>
@@ -554,9 +698,90 @@ function Dashboard() {
             </div>
           )}
 
+          {activeTab === 'profile' && (
+            <div className="track-user-container">
+              <h2 className="section-title white-text">Profile</h2>
+              <div className="user-card" style={{ padding: '30px', cursor: 'default', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                  <h3 style={{ color: '#2d3436', margin: 0, fontSize: '22px' }}>Personal Information</h3>
+                  {!isEditingDoctor ? (
+                    <button className="edit-profile-btn" onClick={() => setIsEditingDoctor(true)}>Edit Details</button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button className="cancel-btn" style={{ padding: '8px 16px' }} onClick={() => setIsEditingDoctor(false)}>Cancel</button>
+                      <button className="submit-btn" style={{ padding: '8px 16px' }} disabled={isSavingDoctor} onClick={async () => {
+                        try {
+                          setIsSavingDoctor(true);
+                          await setDoc(doc(db, 'doctorProfiles', currentUser.uid), doctorProfile);
+                          setIsEditingDoctor(false);
+                          setNotification({ message: 'Profile updated successfully!', type: 'success' });
+                          setTimeout(() => setNotification(null), 3000);
+                        } catch (error) {
+                          console.error(error);
+                          alert('Failed to save profile');
+                        } finally {
+                          setIsSavingDoctor(false);
+                        }
+                      }}>{isSavingDoctor ? 'Saving...' : 'Save'}</button>
+                    </div>
+                  )}
+                </div>
 
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ textAlign: 'left', display: 'block' }}>Name</label>
+                    {isEditingDoctor ? (
+                      <input type="text" className="form-input" value={doctorProfile.name} onChange={(e) => setDoctorProfile({ ...doctorProfile, name: e.target.value })} placeholder="Dr. John Doe" />
+                    ) : (
+                      <div style={{ fontSize: '16px', color: '#333', padding: '10px 0' }}>{doctorProfile.name || 'Not provided'}</div>
+                    )}
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ textAlign: 'left', display: 'block' }}>Position</label>
+                    {isEditingDoctor ? (
+                      <input type="text" className="form-input" value={doctorProfile.position} onChange={(e) => setDoctorProfile({ ...doctorProfile, position: e.target.value })} placeholder="Cardiologist" />
+                    ) : (
+                      <div style={{ fontSize: '16px', color: '#333', padding: '10px 0' }}>{doctorProfile.position || 'Not provided'}</div>
+                    )}
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ textAlign: 'left', display: 'block' }}>Email</label>
+                    {isEditingDoctor ? (
+                      <input type="email" className="form-input" value={doctorProfile.email} onChange={(e) => setDoctorProfile({ ...doctorProfile, email: e.target.value })} />
+                    ) : (
+                      <div style={{ fontSize: '16px', color: '#333', padding: '10px 0' }}>{doctorProfile.email || currentUser?.email || 'Not provided'}</div>
+                    )}
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ textAlign: 'left', display: 'block' }}>Date of Birth</label>
+                    {isEditingDoctor ? (
+                      <input type="date" className="form-input" value={doctorProfile.dob} onChange={(e) => setDoctorProfile({ ...doctorProfile, dob: e.target.value })} />
+                    ) : (
+                      <div style={{ fontSize: '16px', color: '#333', padding: '10px 0' }}>{doctorProfile.dob || 'Not provided'}</div>
+                    )}
+                  </div>
+                </div>
 
+                <hr style={{ border: 'none', borderTop: '1px solid #e0e0e0', margin: '20px 0' }} />
 
+                <p style={{ marginTop: '15px', fontSize: '16px', color: '#636e72', textAlign: 'left' }}>
+                  <strong>Total Patients tracked:</strong> {trackedUsersData.length}
+                </p>
+                {trackedUsersData.length > 0 && (
+                  <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                    <strong style={{ color: '#636e72' }}>Patient List:</strong>
+                    <ul style={{ marginTop: '10px', color: '#2d3436', listStyleType: 'disc', paddingLeft: '20px' }}>
+                      {trackedUsersData.map(patient => (
+                        <li key={patient.id} style={{ marginBottom: '5px', fontSize: '15px' }}>
+                          <strong style={{ fontWeight: 600 }}>{patient.name}</strong> - {patient.gender}, Age: {patient.age}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {activeTab === 'track-user' && (
             <div className="track-user-container">
@@ -571,7 +796,7 @@ function Dashboard() {
                         <div className="card-summary" onClick={() => toggleCardExpansion(userData.id)}>
                           <h3>{userData.name}</h3>
                           <p>Age: {userData.age}</p>
-                          <p>BMI Category: <span className={`bmi-tag ${userData.bmiCategory?.toLowerCase().replace(' ', '-')}`}>{userData.bmiCategory || 'N/A'}</span></p>
+                          <p>Risk Category: <span className={`risk-tag ${userData.modelResults?.category?.toLowerCase().includes('high') || userData.modelResults?.prediction?.toLowerCase().includes('high') ? 'high' : (userData.modelResults?.category?.toLowerCase().includes('moderate') || userData.modelResults?.prediction?.toLowerCase().includes('moderate') ? 'moderate' : (userData.modelResults?.category?.toLowerCase().includes('low') || userData.modelResults?.prediction?.toLowerCase().includes('low') || userData.modelResults?.category?.toLowerCase().includes('normal') || userData.modelResults?.prediction?.toLowerCase().includes('normal') ? 'low' : ''))}`}>{userData.modelResults?.category?.replace(' Risk', '') || userData.modelResults?.prediction || 'N/A'}</span></p>
                         </div>
                         <div className="card-actions">
                           <div className="card-expand-icon" onClick={(e) => { e.stopPropagation(); toggleCardExpansion(userData.id); }}>
@@ -764,6 +989,28 @@ function Dashboard() {
                             <div className="last-updated">
                               Last Updated: {new Date(userData.updatedAt).toLocaleString()}
                             </div>
+
+                            <div className="view-details-actions">
+                              <button
+                                type="button"
+                                className="edit-profile-btn"
+                                onClick={(e) => { e.stopPropagation(); setEditingUserId(userData.id); setEditFormData({ ...userData }); }}
+                              >
+                                Edit Profile
+                              </button>
+                              <button
+                                type="button"
+                                className="delete-profile-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (window.confirm(`Are you sure you want to permanently delete ${userData.name}'s profile? This cannot be undone.`)) {
+                                    handleDeleteUser(userData.id);
+                                  }
+                                }}
+                              >
+                                Delete Profile
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -773,7 +1020,7 @@ function Dashboard() {
               ) : (
                 <div className="no-data-message">
                   <p>No user data found. Please add a user profile first.</p>
-                  <button className="try-it-btn" onClick={() => setShowPopup(true)}>Add User</button>
+                  <button className="try-it-btn" onClick={() => { setShowPopup(true); fetchUserData(); setPopupMode('user-type-selection'); }}>Add User</button>
                 </div>
               )}
             </div>
@@ -789,7 +1036,58 @@ function Dashboard() {
                   <button className="close-btn" onClick={handleClosePopup}>×</button>
                 </div>
 
-                {popupMode === 'selection' ? (
+                {popupMode === 'user-type-selection' ? (
+                  <div className="selection-container">
+                    <div className="selection-card" onClick={() => {
+                      setExistingUserId(null);
+                      setPopupMode('selection');
+                    }}>
+                      <Keyboard className="selection-icon" size={48} />
+                      <h3>Add New User</h3>
+                      <p>Create a new patient profile</p>
+                    </div>
+                    <div className="selection-card" onClick={() => setPopupMode('existing-user-list')}>
+                      <Keyboard className="selection-icon" size={48} />
+                      <h3>Update Existing User</h3>
+                      <p>Choose from existing patient records</p>
+                    </div>
+                  </div>
+                ) : popupMode === 'existing-user-list' ? (
+                  <div className="popup-form" style={{ padding: '20px' }}>
+                    <h3 style={{ marginBottom: '20px', color: '#333' }}>Select User to Update</h3>
+                    {trackedUsersData.length === 0 ? (
+                      <p>No existing users found.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflowY: 'auto', paddingRight: '10px' }}>
+                        {trackedUsersData.map(user => (
+                          <div key={user.id} onClick={() => {
+                            setFormData({
+                              name: user.name || '',
+                              age: user.age || '',
+                              gender: user.gender || '',
+                              height: user.height || '',
+                              weight: user.weight || '',
+                              bmi: user.bmi || ''
+                            });
+                            setClinicalParams({
+                              nfatc3: user.clinicalParameters?.nfatc3 || '',
+                              dm: user.clinicalParameters?.dm || '',
+                              proBNP: user.clinicalParameters?.proBNP || '',
+                              ef: user.clinicalParameters?.ef || '',
+                              gls: user.clinicalParameters?.gls || ''
+                            });
+                            setExistingUserId(user.id);
+                            setPopupMode('form');
+                          }} className="existing-user-card" style={{ padding: '12px 16px', cursor: 'pointer', border: '1px solid #e0e0e0', margin: '0 5px 10px 5px', borderRadius: '8px', textAlign: 'left', backgroundColor: '#fdfdfd' }}>
+                            <div style={{ fontSize: '16px', color: '#2d3436', fontWeight: 600 }}>{user.name}</div>
+                            <div style={{ color: '#636e72', fontSize: '13px', marginTop: '4px' }}>Age: {user.age} {user.gender ? ` • ${user.gender}` : ''}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button type="button" className="cancel-btn" style={{ marginTop: '20px' }} onClick={() => setPopupMode('user-type-selection')}>Back</button>
+                  </div>
+                ) : popupMode === 'selection' ? (
                   <div className="selection-container">
                     <label className="selection-card">
                       <input
@@ -1104,8 +1402,8 @@ function Dashboard() {
                       )}
                       {modelResults.category && (
                         <div className="result-item">
-                          <span className="result-label">Category:</span>
-                          <span className="result-value">{modelResults.category}</span>
+                          <span className="result-label">Risk Category:</span>
+                          <span className="result-value">{modelResults.category.replace(' Risk', '')}</span>
                         </div>
                       )}
                       {modelResults.recommendation && (
