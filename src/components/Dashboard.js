@@ -10,7 +10,7 @@ import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { FileUp, Keyboard } from 'lucide-react';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 function Dashboard() {
   const { logout, currentUser } = useAuth();
@@ -358,7 +358,7 @@ function Dashboard() {
         }
       };
 
-      const response = await fetch('https://cardiac-api-nyu5ktt44a-uc.a.run.app/analyze', {
+      const response = await fetch('https://cardiac-api-273625541352.us-central1.run.app/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

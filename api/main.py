@@ -11,17 +11,10 @@ import uvicorn
 
 app = FastAPI()
 
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "https://cardiac-strainlabs.web.app",
-    "https://cardiac-strainlabs.firebaseapp.com"
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

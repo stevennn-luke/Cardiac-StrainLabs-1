@@ -99,7 +99,11 @@ function SignIn() {
       await login(email, password);
       navigate('/dashboard');
     } catch (error) {
-      setError('Failed to sign in: ' + error.message);
+      if (error.message.includes('auth/invalid-credential')) {
+        setError('Invalid email or password. If you do not have an account, please sign up instead.');
+      } else {
+        setError('Failed to sign in: ' + error.message);
+      }
     }
     setLoading(false);
   }
